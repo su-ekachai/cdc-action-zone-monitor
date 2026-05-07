@@ -1,0 +1,24 @@
+# CDC Action Zone Monitor
+
+[settings]
+state_file = "last_signals.json"
+
+# Source auto-detected if omitted: *-USD → binance, others → yahoo.
+
+[[watchlist]]
+symbol = "BTC-USD"
+
+[[watchlist]]
+symbol = "ETH-USD"
+
+[[watchlist]]
+symbol = "AAPL"
+source = "yahoo"
+
+[[watchlist]]
+symbol = "PTT.BK"
+source = "yahoo"
+
+[[watchlist]]
+symbol = "ADVANC.BK"
+source = "yahoo"
