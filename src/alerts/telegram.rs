@@ -21,7 +21,8 @@ pub fn ping(token: &str) -> anyhow::Result<String> {
     let url = format!("https://api.telegram.org/bot{token}/getMe");
     log::debug!("Pinging Telegram API (getMe)");
 
-    let mut response = ureq::get(&url)
+    let mut response = crate::http::agent()
+        .get(&url)
         .call()
         .context("Telegram API request failed")?;
 
@@ -56,6 +57,13 @@ struct TelegramMessage {
     parse_mode: String,
 }
 
+/// Escapes the HTML-special characters required by Telegram's HTML parse mode.
+fn escape_html(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
 /// Builds the HTML-formatted alert message for a signal.
 pub(crate) fn format_alert_message(signal: &Signal) -> String {
     let emoji = match signal.signal_type {
@@ -81,7 +89,7 @@ pub(crate) fn format_alert_message(signal: &Signal) -> String {
          \n\
          EMA(12): {fast:.2} crossed {direction} EMA(26): {slow:.2}",
         signal_type = signal.signal_type,
-        symbol = signal.symbol,
+        symbol = escape_html(&signal.symbol),
         price = signal.price,
         zone = signal.zone.label(),
         rsi = signal.rsi,
@@ -124,7 +132,8 @@ pub fn send_alert(config: &Config, signal: &Signal) -> anyhow::Result<()> {
         config.telegram_chat_id
     );
 
-    let response = ureq::post(&url)
+    let response = crate::http::agent()
+        .post(&url)
         .send_json(&msg)
         .with_context(|| format!("{}: telegram API request failed", signal.symbol))?;
 
@@ -202,6 +211,16 @@ mod tests {
         let msg = format_alert_message(&signal);
 
         assert!(msg.contains("Bearish (below SMA50)"));
+    }
+
+    #[test]
+    fn test_format_alert_escapes_html_in_symbol() {
+        let mut signal = make_signal(SignalType::Buy, 245.67, 230.0);
+        signal.symbol = "A&B<C>".to_string();
+        let msg = format_alert_message(&signal);
+
+        assert!(msg.contains("A&amp;B&lt;C&gt;"));
+        assert!(!msg.contains("B<C>"));
     }
 
     #[test]

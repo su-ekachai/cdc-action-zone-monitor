@@ -37,12 +37,9 @@ impl Config {
             .with_context(|| format!("Failed to read config file: {config_path}"))?;
         let toml_cfg: TomlConfig = toml::from_str(&content)
             .with_context(|| format!("Failed to parse config file: {config_path}"))?;
-        Ok(std::env::var("STATE_FILE").unwrap_or_else(|_| {
-            toml_cfg
-                .settings
-                .and_then(|s| s.state_file)
-                .unwrap_or_else(|| "last_signals.json".to_string())
-        }))
+        Ok(resolve_state_file(
+            toml_cfg.settings.and_then(|s| s.state_file),
+        ))
     }
 
     /// Loads the full configuration required for scan operations.
@@ -77,13 +74,7 @@ impl Config {
             bail!("TELEGRAM_CHAT_ID cannot be empty");
         }
 
-        let settings = toml_cfg.settings.unwrap_or(Settings { state_file: None });
-
-        let state_file = std::env::var("STATE_FILE").unwrap_or_else(|_| {
-            settings
-                .state_file
-                .unwrap_or_else(|| "last_signals.json".to_string())
-        });
+        let state_file = resolve_state_file(toml_cfg.settings.and_then(|s| s.state_file));
 
         let watchlist = watchlist::load(path)?;
 
@@ -99,6 +90,13 @@ impl Config {
             watchlist,
         })
     }
+}
+
+/// Resolves the state file path: the `STATE_FILE` env var overrides the TOML
+/// value; falls back to `last_signals.json`.
+fn resolve_state_file(toml_value: Option<String>) -> String {
+    std::env::var("STATE_FILE")
+        .unwrap_or_else(|_| toml_value.unwrap_or_else(|| "last_signals.json".to_string()))
 }
 
 #[cfg(test)]

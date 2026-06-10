@@ -11,11 +11,15 @@ use crate::data::{Candle, DataProvider, format_date};
 /// Fetches daily candles from the Yahoo Finance v8 chart API.
 ///
 /// Suitable for equities, ETFs, and indices (e.g., `AAPL`, `PTT.BK`, `^GSPC`).
-pub struct YahooProvider;
+pub struct YahooProvider {
+    agent: ureq::Agent,
+}
 
 impl YahooProvider {
     pub fn new() -> Self {
-        Self
+        Self {
+            agent: crate::http::agent(),
+        }
     }
 }
 
@@ -28,7 +32,9 @@ impl DataProvider for YahooProvider {
         log::info!("{symbol}: fetching from yahoo finance");
         log::trace!("{symbol}: GET {url}");
 
-        let response: YahooResponse = ureq::get(&url)
+        let response: YahooResponse = self
+            .agent
+            .get(&url)
             .header("User-Agent", "Mozilla/5.0 (compatible; CDCAZMonitor/0.1)")
             .call()
             .with_context(|| format!("{symbol}: yahoo HTTP request failed"))?

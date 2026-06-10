@@ -23,6 +23,8 @@
 mod alerts;
 mod config;
 mod data;
+mod fsutil;
+mod http;
 mod signals;
 mod state;
 mod watchlist;
@@ -347,7 +349,11 @@ fn run_scan(
                 alerted,
             });
 
-            state.update(&signal);
+            // Record state only after successful delivery: a failed send must
+            // retry on the next run, and dry-run must leave no trace.
+            if alerted {
+                state.update(&signal);
+            }
         } else {
             log::info!(
                 "{}: {} signal unchanged since last alert, skipping",
@@ -363,7 +369,9 @@ fn run_scan(
         );
     }
 
-    state.save()?;
+    if !dry_run {
+        state.save()?;
+    }
 
     if show_progress {
         eprint!("\r\x1b[K");

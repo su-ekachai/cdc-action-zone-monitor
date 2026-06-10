@@ -47,7 +47,10 @@ pub struct WatchlistEntry {
 }
 
 impl WatchlistEntry {
-    pub fn with_auto_source(symbol: String, source: Option<DataSource>) -> Self {
+    pub fn with_auto_source(symbol: &str, source: Option<DataSource>) -> Self {
+        // Normalize to uppercase so hand-edited lowercase entries still route
+        // and map correctly (Binance pair mapping is built from this form).
+        let symbol = symbol.to_uppercase();
         let source = source.unwrap_or_else(|| detect_source(&symbol));
         Self { symbol, source }
     }
@@ -84,7 +87,7 @@ pub fn load(path: &str) -> anyhow::Result<Vec<WatchlistEntry>> {
         .watchlist
         .unwrap_or_default()
         .into_iter()
-        .map(|raw| WatchlistEntry::with_auto_source(raw.symbol, raw.source))
+        .map(|raw| WatchlistEntry::with_auto_source(&raw.symbol, raw.source))
         .collect();
 
     Ok(entries)
@@ -131,7 +134,7 @@ pub fn add(path: &str, symbol: &str, source: Option<DataSource>) -> anyhow::Resu
         doc.insert("watchlist", toml_edit::Item::ArrayOfTables(arr));
     }
 
-    std::fs::write(path, doc.to_string())
+    crate::fsutil::write_atomic(path, &doc.to_string())
         .with_context(|| format!("Failed to write config file: {path}"))?;
 
     log::debug!("Appended [[watchlist]] entry: symbol={upper}, source={source}");
@@ -189,7 +192,7 @@ pub fn remove(path: &str, symbol: &str) -> anyhow::Result<()> {
         }
     }
 
-    std::fs::write(path, doc.to_string())
+    crate::fsutil::write_atomic(path, &doc.to_string())
         .with_context(|| format!("Failed to write config file: {path}"))?;
 
     log::debug!("Removed [[watchlist]] entry: symbol={upper}");
@@ -300,6 +303,21 @@ source = "yahoo"
         assert_eq!(entries[0].source, DataSource::Binance);
         assert_eq!(entries[1].symbol, "AAPL");
         assert_eq!(entries[1].source, DataSource::Yahoo);
+    }
+
+    #[test]
+    fn test_load_normalizes_symbol_case() {
+        // Hand-edited lowercase entries must still route to Binance and
+        // display in canonical uppercase form.
+        let f = write_test_config(
+            r#"
+[[watchlist]]
+symbol = "btc-usd"
+"#,
+        );
+        let entries = load(f.path().to_str().unwrap()).unwrap();
+        assert_eq!(entries[0].symbol, "BTC-USD");
+        assert_eq!(entries[0].source, DataSource::Binance);
     }
 
     #[test]
@@ -438,8 +456,7 @@ source = "binance"
 
     #[test]
     fn test_with_auto_source_explicit_override() {
-        let entry =
-            WatchlistEntry::with_auto_source("BTC-USD".to_string(), Some(DataSource::Yahoo));
+        let entry = WatchlistEntry::with_auto_source("BTC-USD", Some(DataSource::Yahoo));
         assert_eq!(entry.source, DataSource::Yahoo);
     }
 
