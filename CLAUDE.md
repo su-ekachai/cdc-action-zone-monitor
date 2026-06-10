@@ -25,6 +25,13 @@ main.rs → config + watchlist + state
 - **prek**: Single-binary pre-commit hook runner (no Python dependency)
 - **Pedantic clippy**: Enabled via `[lints.clippy]` in Cargo.toml with targeted allows
 - Alerts fire on **crossover events only**; RSI/volume are informational context
+- **Closed candles only (Binance)**: the in-progress UTC-day candle is dropped before
+  analysis, so signals fire on bar close (no repaint) — matching the original
+  TradingView script. Yahoo candles are not filtered; run the scan after market close.
+- **State updates only on delivered alerts**: `--dry-run` and failed Telegram sends
+  leave the state file untouched, so a same-day re-run retries the alert
+- **Atomic file writes**: state and watchlist writes go through `fsutil::write_atomic`
+  (temp file + rename) so a mid-write kill can't corrupt them
 
 ## Module Layout
 
@@ -34,6 +41,8 @@ src/
 ├── config.rs          TOML + env var config loading
 ├── watchlist.rs       TOML-backed watchlist CRUD
 ├── state.rs           Last signal tracking (JSON)
+├── fsutil.rs          Atomic file write helper (temp + rename)
+├── http.rs            Shared ureq agent with timeouts (30s global, 10s connect)
 ├── data.rs            Candle type + DataProvider trait
 ├── data/
 │   ├── yahoo.rs       Yahoo Finance chart API
@@ -96,6 +105,8 @@ Non-secret settings and the watchlist reside in `config.toml`. Secrets are in `.
 
 - Symbols with `-USD` and no `.` → Binance (e.g., `BTC-USD`, `ETH-USD`)
 - All others → Yahoo Finance (e.g., `AAPL`, `PTT.BK`)
+- Symbols are normalized to uppercase on load, so hand-edited lowercase entries
+  still route and map correctly
 
 ## Pre-commit Hooks
 
@@ -139,5 +150,8 @@ cargo build --release
 scp target/release/cdc-az-daily-alert server:/opt/cdc-monitor/
 scp config.toml server:/opt/cdc-monitor/
 scp .env server:/opt/cdc-monitor/
-# Cron: 0 22 * * * cd /opt/cdc-monitor && ./cdc-az-daily-alert -q scan
+# Cron (UTC): run just after the Binance daily candle closes at 00:00 UTC.
+# Crypto alerts arrive minutes after bar close; US/TH stock candles from the
+# prior session are also final by then.
+# 5 0 * * * cd /opt/cdc-monitor && ./cdc-az-daily-alert -q scan
 ```

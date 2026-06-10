@@ -68,20 +68,25 @@ impl StateStore {
         }
     }
 
-    /// Returns `true` if the signal direction changed since the last alert for this symbol.
+    /// Returns `true` if this signal is new since the last alert for this symbol:
+    /// either the direction changed, or it is a fresh crossover on a different
+    /// candle date (covers an opposite crossover missed during downtime).
     ///
     /// Also returns `true` if no previous signal exists (first detection).
+    /// Same-day re-runs of an already-alerted signal return `false`.
     pub fn should_alert(&self, symbol: &str, new_signal: &Signal) -> bool {
         match self.signals.get(symbol) {
             None => true,
-            Some(last) => last.signal_type != new_signal.signal_type,
+            Some(last) => {
+                last.signal_type != new_signal.signal_type
+                    || last.date != signal_date(new_signal.timestamp)
+            }
         }
     }
 
     /// Records a signal as the new last-alerted state for its symbol.
     pub fn update(&mut self, signal: &Signal) {
-        let date = time::OffsetDateTime::from_unix_timestamp(signal.timestamp)
-            .map_or_else(|_| "unknown".to_string(), |dt| dt.date().to_string());
+        let date = signal_date(signal.timestamp);
 
         self.signals.insert(
             signal.symbol.clone(),
@@ -102,7 +107,7 @@ impl StateStore {
     pub fn save(&self) -> anyhow::Result<()> {
         let json =
             serde_json::to_string_pretty(&self.signals).context("Failed to serialize state")?;
-        std::fs::write(&self.path, &json)
+        crate::fsutil::write_atomic(&self.path, &json)
             .with_context(|| format!("Failed to write state to {}", self.path))?;
         log::debug!(
             "State saved: {} symbol(s) to {}",
@@ -111,6 +116,12 @@ impl StateStore {
         );
         Ok(())
     }
+}
+
+/// Converts a unix timestamp to the ISO 8601 date (`YYYY-MM-DD`) of its candle.
+fn signal_date(timestamp: i64) -> String {
+    time::OffsetDateTime::from_unix_timestamp(timestamp)
+        .map_or_else(|_| "unknown".to_string(), |dt| dt.date().to_string())
 }
 
 #[cfg(test)]
@@ -152,6 +163,22 @@ mod tests {
         let signal = make_signal(SignalType::Buy);
         store.update(&signal);
         assert!(!store.should_alert("TEST", &signal));
+    }
+
+    #[test]
+    fn test_should_alert_same_direction_new_date() {
+        let mut store = StateStore {
+            path: String::new(),
+            signals: HashMap::new(),
+        };
+        let buy = make_signal(SignalType::Buy);
+        store.update(&buy);
+
+        // A fresh crossover in the same direction on a later candle date must
+        // alert (covers an opposite crossover missed during downtime).
+        let mut later_buy = make_signal(SignalType::Buy);
+        later_buy.timestamp += 86_400;
+        assert!(store.should_alert("TEST", &later_buy));
     }
 
     #[test]

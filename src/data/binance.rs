@@ -11,11 +11,15 @@ use crate::data::{Candle, DataProvider, format_date};
 /// Fetches daily candles from the Binance spot market klines API.
 ///
 /// Suitable for cryptocurrency pairs traded against USDT on Binance.
-pub struct BinanceProvider;
+pub struct BinanceProvider {
+    agent: ureq::Agent,
+}
 
 impl BinanceProvider {
     pub fn new() -> Self {
-        Self
+        Self {
+            agent: crate::http::agent(),
+        }
     }
 
     /// Converts watchlist symbol format to a Binance trading pair.
@@ -24,9 +28,9 @@ impl BinanceProvider {
     /// Example: `BTC-USD` → `BTCUSDT`, `SOL-USD` → `SOLUSDT`.
     fn map_symbol(symbol: &str) -> String {
         symbol
+            .to_uppercase()
             .replace("-USD", "USDT")
             .replace('-', "")
-            .to_uppercase()
     }
 }
 
@@ -39,7 +43,9 @@ impl DataProvider for BinanceProvider {
         log::info!("{symbol}: fetching from binance (mapped: {mapped})");
         log::trace!("{symbol}: GET {url}");
 
-        let response: Vec<Vec<serde_json::Value>> = ureq::get(&url)
+        let response: Vec<Vec<serde_json::Value>> = self
+            .agent
+            .get(&url)
             .call()
             .with_context(|| format!("{symbol}: binance HTTP request failed"))?
             .body_mut()
@@ -50,10 +56,23 @@ impl DataProvider for BinanceProvider {
             bail!("{symbol}: binance returned empty response (mapped: {mapped})");
         }
 
-        let candles: Vec<Candle> = response.iter().filter_map(|k| parse_kline(k)).collect();
+        let parsed: Vec<Candle> = response.iter().filter_map(|k| parse_kline(k)).collect();
 
-        if candles.is_empty() {
+        if parsed.is_empty() {
             bail!("{symbol}: all klines failed to parse (mapped: {mapped})");
+        }
+
+        let total = parsed.len();
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let candles = drop_unclosed(parsed, now);
+        if candles.len() < total {
+            log::debug!(
+                "{symbol}: dropped {} unclosed candle(s) for the current UTC day",
+                total - candles.len()
+            );
+        }
+        if candles.is_empty() {
+            bail!("{symbol}: no closed candles remain after dropping the current UTC day");
         }
 
         let first_ts = candles.first().map_or(0, |c| c.timestamp);
@@ -66,6 +85,17 @@ impl DataProvider for BinanceProvider {
         );
         Ok(candles)
     }
+}
+
+/// Removes candles belonging to the current (still open) UTC day.
+///
+/// Binance daily klines open at 00:00 UTC and the API includes the in-progress
+/// candle; a crossover computed on it can reverse before close. CDC Action Zone
+/// signals on bar close, so only fully closed candles are analyzed.
+fn drop_unclosed(mut candles: Vec<Candle>, now_utc: i64) -> Vec<Candle> {
+    let day_start = now_utc - now_utc.rem_euclid(86_400);
+    candles.retain(|c| c.timestamp < day_start);
+    candles
 }
 
 /// Parses a single Binance kline JSON array into a [`Candle`].
@@ -154,15 +184,52 @@ mod tests {
     }
 
     #[test]
-    fn test_symbol_mapping_preserves_usd_case_sensitivity() {
-        // map_symbol expects the canonical format "*-USD"; lowercase won't match the replace
-        assert_eq!(BinanceProvider::map_symbol("btc-usd"), "BTCUSD");
-        // Uppercase works correctly
+    fn test_symbol_mapping_lowercase_input() {
+        // Lowercase input must map to the same pair as uppercase
+        assert_eq!(BinanceProvider::map_symbol("btc-usd"), "BTCUSDT");
         assert_eq!(BinanceProvider::map_symbol("BTC-USD"), "BTCUSDT");
     }
 
     #[test]
     fn test_symbol_mapping_no_hyphen() {
         assert_eq!(BinanceProvider::map_symbol("BTCUSDT"), "BTCUSDT");
+    }
+
+    const DAY: i64 = 86_400;
+    /// 2024-01-01T00:00:00Z — a UTC day boundary.
+    const DAY_START: i64 = 1_704_067_200;
+
+    fn make_candle(timestamp: i64) -> Candle {
+        Candle {
+            timestamp,
+            open: 1.0,
+            high: 2.0,
+            low: 0.5,
+            close: 1.5,
+            volume: 100.0,
+        }
+    }
+
+    #[test]
+    fn test_drop_unclosed_removes_current_day_candle() {
+        let candles = vec![
+            make_candle(DAY_START - 2 * DAY),
+            make_candle(DAY_START - DAY),
+            make_candle(DAY_START),
+        ];
+        // now = 22:00 UTC on the day that opened at DAY_START
+        let result = drop_unclosed(candles, DAY_START + 79_200);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result.last().unwrap().timestamp, DAY_START - DAY);
+    }
+
+    #[test]
+    fn test_drop_unclosed_keeps_all_closed_candles() {
+        let candles = vec![
+            make_candle(DAY_START - 2 * DAY),
+            make_candle(DAY_START - DAY),
+        ];
+        let result = drop_unclosed(candles, DAY_START + 60);
+        assert_eq!(result.len(), 2);
     }
 }
