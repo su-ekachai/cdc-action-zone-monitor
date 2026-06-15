@@ -7,13 +7,15 @@
 pub mod binance;
 pub mod yahoo;
 
-use serde::{Deserialize, Serialize};
-
 /// A single daily OHLCV (Open-High-Low-Close-Volume) candle.
 ///
 /// Timestamps are Unix epoch seconds in UTC. Price fields use the quote currency
 /// of the trading pair (USD for stocks, USDT for Binance pairs).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// ponytail: open/high/low are parsed to validate each API row (a null/garbage
+// field rejects the candle) but unread — the strategy is close+volume only.
+// Restore reads if you add range-based indicators (ATR, candlestick patterns).
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
 pub struct Candle {
     /// Unix timestamp in seconds (start of daily candle, UTC).
     pub timestamp: i64,
