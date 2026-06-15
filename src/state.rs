@@ -79,14 +79,14 @@ impl StateStore {
             None => true,
             Some(last) => {
                 last.signal_type != new_signal.signal_type
-                    || last.date != signal_date(new_signal.timestamp)
+                    || last.date != crate::data::format_date(new_signal.timestamp)
             }
         }
     }
 
     /// Records a signal as the new last-alerted state for its symbol.
     pub fn update(&mut self, signal: &Signal) {
-        let date = signal_date(signal.timestamp);
+        let date = crate::data::format_date(signal.timestamp);
 
         self.signals.insert(
             signal.symbol.clone(),
@@ -116,12 +116,6 @@ impl StateStore {
         );
         Ok(())
     }
-}
-
-/// Converts a unix timestamp to the ISO 8601 date (`YYYY-MM-DD`) of its candle.
-fn signal_date(timestamp: i64) -> String {
-    time::OffsetDateTime::from_unix_timestamp(timestamp)
-        .map_or_else(|_| "unknown".to_string(), |dt| dt.date().to_string())
 }
 
 #[cfg(test)]
