@@ -198,11 +198,11 @@ state_file = "custom_state.json"
         assert!(result.is_err());
     }
 
-    // Env-var-dependent tests: These test Config::load() which reads
-    // TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID from the process environment.
-    // Because cargo test runs tests in parallel within the same process,
-    // env var mutations can race. We mark these #[ignore] for the default
-    // parallel run and execute them separately with --test-threads=1.
+    // Env-var-dependent tests: these exercise Config::load(), which reads
+    // channel credentials from the process environment. cargo test runs
+    // tests in parallel within one process, so env var mutations race.
+    // These tests are marked #[ignore] for the default parallel run and
+    // execute separately with --test-threads=1.
 
     fn clear_channel_env() {
         unsafe {

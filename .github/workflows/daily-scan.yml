@@ -2,11 +2,12 @@ name: Daily Scan
 
 on:
   schedule:
-    # 22:15 UTC = after US market close (both DST cases), Thai session long
-    # final, crypto uses yesterday's closed candle. :15 offset avoids GitHub's
-    # on-the-hour cron congestion. Note: GitHub cron is best-effort; runs may
-    # start 5-30 minutes late, which is fine for daily candles.
-    - cron: '15 22 * * *'
+    # 00:15 UTC = minutes after the Binance daily candle closes at 00:00 UTC,
+    # so crypto signals fire on the freshest closed bar. Stock sessions (US,
+    # Thai) are also long closed at this hour. The :15 offset avoids GitHub's
+    # on-the-hour cron congestion. GitHub cron is best-effort; runs may start
+    # 5-30 minutes late, which is fine for daily candles.
+    - cron: '15 0 * * *'
   workflow_dispatch:
 
 permissions:

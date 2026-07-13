@@ -19,7 +19,7 @@ main.rs → config + watchlist + state
 On GitHub Actions the workflow commits `last_signals.json` back to the repo after
 each scan so state survives ephemeral runners.
 
-## Key Decisions
+## Key decisions
 
 - **EMA(12)/EMA(26)**: Original CDC Action Zone parameters (piriya33, TradingView)
 - **ureq** (not reqwest): True blocking HTTP, no tokio runtime, smaller binary
@@ -45,7 +45,7 @@ each scan so state survives ephemeral runners.
 - **Atomic file writes**: state and watchlist writes go through `fsutil::write_atomic`
   (temp file + rename) so a mid-write kill can't corrupt them
 
-## Module Layout
+## Module layout
 
 ```
 src/
@@ -95,7 +95,7 @@ cargo run -- -v scan                     # Debug verbosity
 cargo run -- -q scan                     # Quiet mode (errors only)
 ```
 
-## Exit Codes
+## Exit codes
 
 | Code | Meaning |
 |------|---------|
@@ -118,14 +118,14 @@ Non-secret settings and the watchlist reside in `config.toml`. Secrets are in `.
 
 On GitHub Actions the same names are repo secrets (Settings → Secrets and variables → Actions).
 
-## Data Sources
+## Data sources
 
 - Symbols with `-USD` and no `.` → Binance (e.g., `BTC-USD`, `ETH-USD`)
 - All others → Yahoo Finance (e.g., `AAPL`, `PTT.BK`)
 - Symbols are normalized to uppercase on load, so hand-edited lowercase entries
   still route and map correctly
 
-## Pre-commit Hooks
+## Pre-commit hooks
 
 Managed by [prek](https://github.com/j178/prek) — a single-binary, zero-dependency pre-commit hook runner.
 
@@ -140,7 +140,7 @@ Hooks (defined in `.pre-commit-config.yaml`):
 2. `cargo clippy --all-targets -- -D warnings` — lint (warnings = errors)
 3. `cargo test` — unit tests
 
-## Code Quality
+## Code quality
 
 - **Formatter**: `cargo fmt` (config: `.rustfmt.toml`, edition 2024)
 - **Linter**: `cargo clippy` with pedantic warnings (config: `[lints.clippy]` in `Cargo.toml`)
@@ -162,9 +162,10 @@ cargo run -- -vv scan       # Trace verbosity (HTTP URLs)
 
 ## Deployment
 
-**GitHub Actions (default)**: `.github/workflows/daily-scan.yml` — daily at 22:15 UTC
-+ `workflow_dispatch`. Builds with `Swatinem/rust-cache`, retries the scan once after
-5 minutes, commits state with `[skip ci]`, and notifies Telegram/Discord on failure.
+**GitHub Actions (default)**: `.github/workflows/daily-scan.yml` — daily at 00:15 UTC
+(just after the Binance daily candle closes) + `workflow_dispatch`. Builds with
+`Swatinem/rust-cache`, retries the scan once after 5 minutes, commits state with
+`[skip ci]`, and notifies Telegram/Discord on failure.
 Requires repo secrets and `permissions: contents: write`.
 
 **Self-hosted (cron)**:

@@ -9,19 +9,17 @@ A lightweight Rust CLI that scans a watchlist of assets daily for [CDC Action Zo
 
 ```
 $ cdc-az-daily-alert scan --dry-run
-[1/5] BTC-USD...
-[2/5] ETH-USD...
-[3/5] TSLA...
-[4/5] AAPL...
-[5/5] SOL-USD...
-✓ 2 signal(s) from 5 symbols (3.2s)
+[1/3] BTC-USD...
+[2/3] ETH-USD...
+[3/3] PAXG-USD...
+✓ 1 signal(s) from 3 symbols (1.8s)
 ```
 
 Alert delivered on signal detection (Telegram and/or Discord):
 
 ```
-🔴 Sell Signal: TSLA
-Price: 260.10
+🔴 Sell Signal: BTC-USD
+Price: 61250.00
 Zone: Bear
 
 Strength:
@@ -29,10 +27,10 @@ Strength:
 • Volume: 2.1x average
 • Trend: Bearish (below SMA50)
 
-EMA(12): 258.30 crossed below EMA(26): 259.80
+EMA(12): 61890.55 crossed below EMA(26): 62140.20
 
-↩ Linked: BUY @245.67 on 2026-05-02
-Result: +5.9% over 72 day(s)
+↩ Linked: BUY @58400.00 on 2026-05-02
+Result: +4.9% over 72 day(s)
 ```
 
 ## Features
@@ -60,7 +58,7 @@ cargo build --release
 
 The binary is at `target/release/cdc-az-daily-alert`.
 
-## Quick Start
+## Quick start
 
 ```bash
 # 1. Configure secrets (Telegram vars, Discord webhook, or both)
@@ -103,7 +101,7 @@ Options:
   -V, --version         Print version
 ```
 
-### Watchlist Management
+### Watchlist management
 
 ```bash
 cdc-az-daily-alert list                    # Show watchlist (colored table)
@@ -123,7 +121,7 @@ cdc-az-daily-alert scan --json             # Structured JSON output
 cdc-az-daily-alert -q scan                 # Quiet mode (for cron)
 ```
 
-### Operational Commands
+### Operational commands
 
 ```bash
 cdc-az-daily-alert check                   # Validate config and env vars
@@ -164,7 +162,7 @@ Alert channels are enabled by setting their variables — Telegram, Discord, or 
 | `TELEGRAM_CHAT_ID` | Telegram | Target chat/group ID |
 | `DISCORD_WEBHOOK_URL` | Discord | Webhook URL (Server Settings → Integrations → Webhooks) |
 
-## Signal Logic
+## Signal logic
 
 The [CDC Action Zone](https://www.tradingview.com/script/gBBKMr2T-CDC-ActionZone-V3-2020/) strategy fires alerts on EMA crossovers:
 
@@ -182,7 +180,7 @@ Alerts fire once per direction change. The state file (`last_signals.json`) prev
 
 Each alert also links back to the previous opposite signal for the symbol: a SELL shows the round-trip result of the BUY it closes (`Result: +5.9% over 72 day(s)`), and a BUY shows the price move since the prior SELL (`Since exit: ...`). The first-ever signal for a symbol has no linked line.
 
-## Exit Codes
+## Exit codes
 
 | Code | Meaning |
 |------|---------|
@@ -196,7 +194,7 @@ Pick **one** runner — GitHub Actions or your own machine. Running both duplica
 
 ### GitHub Actions (zero cost, no server)
 
-`.github/workflows/daily-scan.yml` builds and runs the scan daily at 22:15 UTC (05:15 Bangkok) on GitHub's free tier and commits `last_signals.json` back to the repo so state survives between runs.
+`.github/workflows/daily-scan.yml` builds and runs the scan daily at 00:15 UTC (07:15 Bangkok), minutes after the Binance daily candle closes, on GitHub's free tier. It commits `last_signals.json` back to the repo so state survives between runs.
 
 Setup: add repo secrets under **Settings → Secrets and variables → Actions** — `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` and/or `DISCORD_WEBHOOK_URL` — then trigger a test run via **Actions → Daily Scan → Run workflow**.
 
@@ -204,7 +202,7 @@ Notes:
 - GitHub cron is best-effort; runs can start 5–30 minutes late (fine for daily candles)
 - Scheduled workflows auto-disable after 60 days without repo activity — GitHub emails a warning with one-click re-enable
 - On scan failure the workflow retries once after 5 minutes, then notifies your alert channels
-- On quiet days a short heartbeat (`✅ Daily scan OK — 5 symbols, no new signals`) confirms the pipeline is alive
+- On quiet days a short heartbeat (`✅ Scan OK — 3 symbols, no new signals`) confirms the pipeline is alive
 
 ### Self-hosted (cron)
 
@@ -217,10 +215,10 @@ scp target/release/cdc-az-daily-alert user@server:/opt/cdc-monitor/
 scp config.toml .env user@server:/opt/cdc-monitor/
 ```
 
-Schedule daily via cron (runs at 22:00 UTC, after US market close):
+Schedule daily via cron (runs at 00:05 UTC, just after the Binance daily candle closes; stock sessions are also closed by then):
 
 ```
-0 22 * * * cd /opt/cdc-monitor && ./cdc-az-daily-alert -q scan >> /var/log/cdc-monitor.log 2>&1
+5 0 * * * cd /opt/cdc-monitor && ./cdc-az-daily-alert -q scan >> /var/log/cdc-monitor.log 2>&1
 ```
 
 ### Raspberry Pi (cross-compile)
@@ -239,7 +237,7 @@ cargo run -- -vv scan         # Trace verbosity (shows HTTP URLs)
 cargo run -- scan --dry-run   # Test without sending alerts
 ```
 
-### Code Quality
+### Code quality
 
 - **Formatter**: `cargo fmt` (edition 2024, config: `.rustfmt.toml`)
 - **Linter**: `cargo clippy` with pedantic warnings (config: `[lints.clippy]` in `Cargo.toml`)

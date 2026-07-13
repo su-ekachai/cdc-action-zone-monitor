@@ -13,7 +13,7 @@ pub mod yahoo;
 /// of the trading pair (USD for stocks, USDT for Binance pairs).
 // ponytail: open/high/low are parsed to validate each API row (a null/garbage
 // field rejects the candle) but unread — the strategy is close+volume only.
-// Restore reads if you add range-based indicators (ATR, candlestick patterns).
+// Restore reads when range-based indicators (ATR, candlestick patterns) are added.
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Candle {
