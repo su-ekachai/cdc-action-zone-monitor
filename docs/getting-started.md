@@ -136,6 +136,7 @@ Known limitations:
   commits normally keep it alive, and GitHub emails a warning with a one-click re-enable
 - Yahoo Finance occasionally rate-limits datacenter IPs; the workflow retries
   once after 5 minutes, and persistent failures are reported to your alert channels
+- On days with no signals, a short heartbeat message confirms the scan ran
 
 ### Linux/Mac (cron)
 

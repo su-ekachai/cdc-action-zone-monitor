@@ -35,12 +35,43 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         # Retry once after 5 minutes to absorb transient failures
         # (Yahoo Finance occasionally rate-limits datacenter IPs).
+        # --json goes to a file for the heartbeat step; log lines still
+        # reach the Actions console via stderr.
         run: |
-          ./target/release/cdc-az-daily-alert scan || {
+          ./target/release/cdc-az-daily-alert scan --json > scan-result.json || {
             echo "Scan failed — retrying in 5 minutes..."
             sleep 300
-            ./target/release/cdc-az-daily-alert scan
+            ./target/release/cdc-az-daily-alert scan --json > scan-result.json
           }
+
+      - name: Heartbeat when no signals
+        # Signal alerts come from the binary itself; on quiet days send a
+        # short still-alive note so silence never means "silently broken".
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          SIGNALS=$(jq '.signals | length' scan-result.json)
+          SYMBOLS=$(jq '.symbols_scanned' scan-result.json)
+          ERRORS=$(jq '.errors | length' scan-result.json)
+          if [ "$SIGNALS" != "0" ]; then
+            echo "$SIGNALS signal(s) alerted by the scanner — no heartbeat needed."
+            exit 0
+          fi
+          MSG="✅ Daily scan OK — $SYMBOLS symbols, no new signals"
+          if [ "$ERRORS" != "0" ]; then
+            MSG="$MSG ($ERRORS symbol(s) failed — see Actions log)"
+          fi
+          if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
+            curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode text="$MSG" || true
+          fi
+          if [ -n "$DISCORD_WEBHOOK_URL" ]; then
+            curl -sS -X POST "$DISCORD_WEBHOOK_URL" \
+              -H "Content-Type: application/json" \
+              -d "{\"content\": \"$MSG\"}" || true
+          fi
 
       - name: Commit updated state
         # State changes only when a signal fires; skip empty commits.
