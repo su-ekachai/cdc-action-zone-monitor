@@ -203,6 +203,7 @@ Notes:
 - GitHub cron is best-effort; runs can start 5–30 minutes late (fine for daily candles)
 - Scheduled workflows auto-disable after 60 days without repo activity — GitHub emails a warning with one-click re-enable
 - On scan failure the workflow retries once after 5 minutes, then notifies your alert channels
+- On quiet days a short heartbeat (`✅ Daily scan OK — 5 symbols, no new signals`) confirms the pipeline is alive
 
 ### Self-hosted (cron)
 
