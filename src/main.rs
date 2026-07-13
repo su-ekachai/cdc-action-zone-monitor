@@ -275,6 +275,10 @@ fn run_scan(
     let mut error_messages: Vec<String> = Vec::new();
     let mut signals_found = 0;
     let mut errors = 0;
+    // Tracked separately from `errors` (which also counts per-channel alert
+    // delivery failures) so the all-symbols-failed bail below can't be
+    // triggered or masked by delivery errors.
+    let mut fetch_failures = 0;
     let total = config.watchlist.len();
 
     let show_progress =
@@ -296,6 +300,7 @@ fn run_scan(
                 let msg = format!("{}: fetch failed: {e:#}", entry.symbol);
                 log::error!("{msg}");
                 errors += 1;
+                fetch_failures += 1;
                 error_messages.push(msg);
                 continue;
             }
@@ -425,7 +430,7 @@ fn run_scan(
         }
     }
 
-    if errors == total {
+    if fetch_failures == total {
         anyhow::bail!(
             "All {total} symbols failed during scan. Run with -v for details, or use 'check' to validate configuration."
         );
@@ -620,7 +625,7 @@ fn run_status(config_path: &str, json: bool) -> anyhow::Result<()> {
         println!("{}", "-".repeat(62));
 
         let mut entries: Vec<_> = state.signals.iter().collect();
-        entries.sort_by_key(|(sym, _)| (*sym).clone());
+        entries.sort_by(|a, b| a.0.cmp(b.0));
 
         for (symbol, last) in entries {
             let signal_str = last.signal_type.to_string();
