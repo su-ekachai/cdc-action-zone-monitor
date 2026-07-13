@@ -9,6 +9,15 @@ pub mod telegram;
 use crate::signals::{Signal, SignalType};
 use crate::state::LastSignal;
 
+/// Builds the tracking header prepended to every outgoing message:
+/// `📅 Daily Scan · YYYY-MM-DD` (UTC date of the sending scan).
+pub(crate) fn date_header() -> String {
+    format!(
+        "\u{1f4c5} Daily Scan \u{00b7} {}",
+        time::OffsetDateTime::now_utc().date()
+    )
+}
+
 /// Builds the channel-agnostic alert content for a signal.
 ///
 /// Returns `(headline, body)` as plain text. Each channel wraps the headline
@@ -198,6 +207,16 @@ mod tests {
         let signal = make_signal(SignalType::Buy, 245.67);
         let (_, body) = alert_content(&signal, None);
         assert!(!body.contains("Linked:"));
+    }
+
+    #[test]
+    fn test_date_header_prefix_and_iso_date() {
+        let header = date_header();
+        let prefix = "\u{1f4c5} Daily Scan \u{00b7} ";
+        assert!(header.starts_with(prefix));
+        let date = &header[prefix.len()..];
+        assert_eq!(date.len(), 10, "expected YYYY-MM-DD, got {date}");
+        assert!(days_between(date, 1_704_067_200).is_some(), "date parses");
     }
 
     #[test]

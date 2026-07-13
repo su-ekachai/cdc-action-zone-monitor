@@ -430,7 +430,11 @@ fn run_scan(config_path: &str, opts: ScanOpts) -> anyhow::Result<()> {
     // "silently broken". Delivery failure logs a warning but does not fail
     // the scan — the heartbeat is best-effort by design.
     if heartbeat && !dry_run && signals_found == 0 {
-        let msg = heartbeat_message(total, errors);
+        let msg = format!(
+            "{}\n{}",
+            alerts::date_header(),
+            heartbeat_message(total, errors)
+        );
         if let Some(telegram) = &config.telegram
             && let Err(e) = alerts::telegram::send_text(telegram, &msg)
         {
