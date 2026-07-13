@@ -91,7 +91,7 @@ source = "yahoo"
 Expected output when all checks pass (Telegram + Discord configured):
 ```
 Config file (config.toml)... OK
-Watchlist (5 entries)... OK
+Watchlist (3 entries)... OK
 TELEGRAM_BOT_TOKEN... set
 TELEGRAM_CHAT_ID... set
 DISCORD_WEBHOOK_URL... set
@@ -122,7 +122,8 @@ duplicates alerts and lets their state files diverge.
 ### GitHub Actions (zero-cost, no server needed)
 
 The repo ships with `.github/workflows/daily-scan.yml`, which builds and runs
-the scan daily at 22:15 UTC and commits `last_signals.json` back to the repo.
+the scan daily at 00:15 UTC (just after the Binance daily candle closes) and
+commits `last_signals.json` back to the repo.
 
 1. Push the repo to GitHub (public repos get unlimited Actions minutes)
 2. Add repo secrets under **Settings → Secrets and variables → Actions**:
@@ -144,10 +145,10 @@ Known limitations:
 crontab -e
 ```
 
-Add this line (runs at 22:00 UTC daily, after US market close):
+Add this line (runs at 00:05 UTC daily, just after the Binance daily candle closes):
 
 ```
-0 22 * * * cd /path/to/cdc-action-zone-monitor && ./target/release/cdc-az-daily-alert -q scan >> scan.log 2>&1
+5 0 * * * cd /path/to/cdc-action-zone-monitor && ./target/release/cdc-az-daily-alert -q scan >> scan.log 2>&1
 ```
 
 The `-q` flag suppresses informational output, logging only errors.

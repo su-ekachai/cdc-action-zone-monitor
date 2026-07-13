@@ -126,8 +126,8 @@ fn post(telegram: &TelegramConfig, text: String, label: &str) -> anyhow::Result<
         .with_context(|| format!("{label}: telegram API request failed"))?;
 
     // Rate-limit courtesy: sleep after each request regardless of outcome.
-    // Note: ureq v3 converts 4xx/5xx to Err at send_json(), so the status
-    // check below is defense-in-depth for non-standard success codes (1xx/3xx).
+    // ureq v3 converts 4xx/5xx to Err at send_json(), so the status check
+    // below is defense-in-depth for non-standard success codes (1xx/3xx).
     std::thread::sleep(std::time::Duration::from_millis(100));
 
     if response.status() != 200 {

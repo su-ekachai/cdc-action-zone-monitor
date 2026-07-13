@@ -12,13 +12,4 @@ symbol = "BTC-USD"
 symbol = "ETH-USD"
 
 [[watchlist]]
-symbol = "AAPL"
-source = "yahoo"
-
-[[watchlist]]
-symbol = "PTT.BK"
-source = "yahoo"
-
-[[watchlist]]
-symbol = "ADVANC.BK"
-source = "yahoo"
+symbol = "PAXG-USD"

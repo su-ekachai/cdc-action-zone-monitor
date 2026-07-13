@@ -355,7 +355,7 @@ fn run_scan(config_path: &str, opts: ScanOpts) -> anyhow::Result<()> {
         };
 
         if state.should_alert(&entry.symbol, &signal) {
-            // Grab the prior signal before state.update() overwrites it —
+            // Read the prior signal before state.update() overwrites it —
             // it feeds the linked-signal context line in the alert.
             let prior = state.signals.get(&entry.symbol).cloned();
 

@@ -243,7 +243,7 @@ mod tests {
 
         assert_eq!(signal.signal_type, SignalType::Buy);
 
-        // Verify the EMA values are what we expect
+        // Verify the EMA values match the hand-calculated series
         let k12 = 2.0 / 13.0; // 0.153846...
         let k26 = 2.0 / 27.0; // 0.074074...
         let expected_fast = (102.0 - 100.0) * k12 + 100.0; // 100.3077
