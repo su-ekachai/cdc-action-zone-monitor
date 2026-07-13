@@ -18,7 +18,7 @@
 //! - [`state`] — JSON-persisted last-signal tracking to prevent duplicate alerts
 //! - [`data`] — Market data providers (Yahoo Finance, Binance)
 //! - [`signals`] — Technical indicators and CDC Action Zone crossover detection
-//! - [`alerts`] — Telegram alert delivery
+//! - [`alerts`] — Telegram and Discord alert delivery
 
 mod alerts;
 mod config;
@@ -114,6 +114,10 @@ enum Command {
         /// Also verify Telegram bot token works
         #[arg(long)]
         telegram: bool,
+
+        /// Also verify Discord webhook works
+        #[arg(long)]
+        discord: bool,
     },
     /// Show last scan results from state file
     Status {
@@ -207,7 +211,7 @@ fn main() {
         }
         Some(Command::Remove { symbol }) => watchlist::remove(config_path, &symbol),
         Some(Command::List { json }) => watchlist::list(config_path, json),
-        Some(Command::Check { telegram }) => run_check(config_path, telegram),
+        Some(Command::Check { telegram, discord }) => run_check(config_path, telegram, discord),
         Some(Command::Status { json }) => run_status(config_path, json),
         Some(Command::Completions { shell }) => {
             let mut cmd = Args::command();
@@ -307,6 +311,10 @@ fn run_scan(
         };
 
         if state.should_alert(&entry.symbol, &signal) {
+            // Grab the prior signal before state.update() overwrites it —
+            // it feeds the linked-signal context line in the alert.
+            let prior = state.signals.get(&entry.symbol).cloned();
+
             let alerted = if dry_run {
                 log::info!(
                     "{}: DRY RUN — would send {} signal (zone: {}, price: {:.2})",
@@ -317,24 +325,25 @@ fn run_scan(
                 );
                 false
             } else {
-                match alerts::telegram::send_alert(&config, &signal) {
-                    Ok(()) => {
-                        log::info!(
-                            "{}: {} signal sent (zone: {}, price: {:.2})",
-                            entry.symbol,
-                            signal.signal_type,
-                            signal.zone.label(),
-                            signal.price
-                        );
-                        true
-                    }
-                    Err(e) => {
-                        let msg = format!("{}: alert delivery failed: {e:#}", entry.symbol);
+                let failures = deliver_alerts(&config, &signal, prior.as_ref());
+                if failures.is_empty() {
+                    log::info!(
+                        "{}: {} signal sent (zone: {}, price: {:.2})",
+                        entry.symbol,
+                        signal.signal_type,
+                        signal.zone.label(),
+                        signal.price
+                    );
+                    true
+                } else {
+                    for (channel, e) in failures {
+                        let msg =
+                            format!("{}: {channel} alert delivery failed: {e:#}", entry.symbol);
                         log::error!("{msg}");
                         errors += 1;
                         error_messages.push(msg);
-                        false
                     }
+                    false
                 }
             };
 
@@ -424,6 +433,34 @@ fn run_scan(
     Ok(())
 }
 
+/// Sends the alert on every configured channel, returning per-channel failures.
+///
+/// The caller records state only when this returns no failures: on a partial
+/// failure the next run retries all channels, so a duplicate on the channel
+/// that succeeded is accepted in exchange for never losing an alert on the
+/// channel that failed.
+fn deliver_alerts(
+    config: &Config,
+    signal: &signals::Signal,
+    prior: Option<&state::LastSignal>,
+) -> Vec<(&'static str, anyhow::Error)> {
+    let mut failures = Vec::new();
+
+    if let Some(telegram) = &config.telegram
+        && let Err(e) = alerts::telegram::send_alert(telegram, signal, prior)
+    {
+        failures.push(("telegram", e));
+    }
+
+    if let Some(webhook_url) = &config.discord_webhook_url
+        && let Err(e) = alerts::discord::send_alert(webhook_url, signal, prior)
+    {
+        failures.push(("discord", e));
+    }
+
+    failures
+}
+
 /// Checks whether an environment variable is set and non-empty, printing the result.
 fn check_env_var(name: &str) -> bool {
     use owo_colors::OwoColorize;
@@ -442,8 +479,8 @@ fn check_env_var(name: &str) -> bool {
     }
 }
 
-/// Validates configuration file and optionally tests Telegram connectivity.
-fn run_check(config_path: &str, test_telegram: bool) -> anyhow::Result<()> {
+/// Validates configuration file and optionally tests Telegram/Discord connectivity.
+fn run_check(config_path: &str, test_telegram: bool, test_discord: bool) -> anyhow::Result<()> {
     use owo_colors::OwoColorize;
     use owo_colors::Stream::Stdout;
 
@@ -472,12 +509,43 @@ fn run_check(config_path: &str, test_telegram: bool) -> anyhow::Result<()> {
         println!("{}", "OK".if_supports_color(Stdout, |s| s.green()));
     }
 
-    // Check 3: Environment variables
+    // Check 3: Alert channel environment variables. A channel is active when
+    // its env vars are set; at least one complete channel is required.
     dotenvy::dotenv().ok();
     let mut has_required = true;
 
-    has_required &= check_env_var("TELEGRAM_BOT_TOKEN");
-    has_required &= check_env_var("TELEGRAM_CHAT_ID");
+    let tg_token = check_env_var("TELEGRAM_BOT_TOKEN");
+    let tg_chat = check_env_var("TELEGRAM_CHAT_ID");
+    let discord_set = check_env_var("DISCORD_WEBHOOK_URL");
+
+    let telegram_active = tg_token && tg_chat;
+    print!("Alert channels... ");
+    if tg_token != tg_chat {
+        println!(
+            "{}: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set together",
+            "FAIL".if_supports_color(Stdout, |s| s.red())
+        );
+        has_required = false;
+    } else if !telegram_active && !discord_set {
+        println!(
+            "{}: no channel configured (set Telegram vars and/or DISCORD_WEBHOOK_URL)",
+            "FAIL".if_supports_color(Stdout, |s| s.red())
+        );
+        has_required = false;
+    } else {
+        let active = [
+            telegram_active.then_some("telegram"),
+            discord_set.then_some("discord"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" + ");
+        println!(
+            "{} ({active})",
+            "OK".if_supports_color(Stdout, |s| s.green())
+        );
+    }
 
     // Check 4: Telegram connectivity (optional)
     if test_telegram {
@@ -487,6 +555,23 @@ fn run_check(config_path: &str, test_telegram: bool) -> anyhow::Result<()> {
         match alerts::telegram::ping(&token) {
             Ok(bot_name) => println!(
                 "{} (bot: @{bot_name})",
+                "OK".if_supports_color(Stdout, |s| s.green())
+            ),
+            Err(e) => {
+                println!("{}: {e}", "FAIL".if_supports_color(Stdout, |s| s.red()));
+                has_required = false;
+            }
+        }
+    }
+
+    // Check 5: Discord connectivity (optional)
+    if test_discord {
+        print!("Discord webhook (GET)... ");
+        let webhook_url = std::env::var("DISCORD_WEBHOOK_URL")
+            .map_err(|_| anyhow::anyhow!("DISCORD_WEBHOOK_URL must be set for --discord check"))?;
+        match alerts::discord::ping(&webhook_url) {
+            Ok(name) => println!(
+                "{} (webhook: {name})",
                 "OK".if_supports_color(Stdout, |s| s.green())
             ),
             Err(e) => {

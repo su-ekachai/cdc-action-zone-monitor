@@ -37,8 +37,12 @@ impl BinanceProvider {
 impl DataProvider for BinanceProvider {
     fn fetch_candles(&self, symbol: &str) -> anyhow::Result<Vec<Candle>> {
         let mapped = Self::map_symbol(symbol);
-        let url =
-            format!("https://api.binance.com/api/v3/klines?symbol={mapped}&interval=1d&limit=100");
+        // data-api.binance.vision is Binance's official public market-data
+        // mirror: same /api/v3/klines shape, but not geo-blocked (api.binance.com
+        // returns HTTP 451 from US IPs, e.g. GitHub Actions runners).
+        let url = format!(
+            "https://data-api.binance.vision/api/v3/klines?symbol={mapped}&interval=1d&limit=100"
+        );
 
         log::info!("{symbol}: fetching from binance (mapped: {mapped})");
         log::trace!("{symbol}: GET {url}");

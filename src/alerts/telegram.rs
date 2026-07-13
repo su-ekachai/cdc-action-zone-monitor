@@ -7,8 +7,9 @@
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
-use crate::config::Config;
-use crate::signals::{Signal, SignalType};
+use crate::config::TelegramConfig;
+use crate::signals::Signal;
+use crate::state::LastSignal;
 
 /// Verifies a Telegram bot token by calling the `getMe` endpoint.
 ///
@@ -65,43 +66,9 @@ fn escape_html(s: &str) -> String {
 }
 
 /// Builds the HTML-formatted alert message for a signal.
-pub(crate) fn format_alert_message(signal: &Signal) -> String {
-    let emoji = match signal.signal_type {
-        SignalType::Buy => "\u{1f7e2}",
-        SignalType::Sell => "\u{1f534}",
-    };
-
-    let trend_label = if signal.price > signal.trend_sma50 {
-        "Bullish (above SMA50)"
-    } else {
-        "Bearish (below SMA50)"
-    };
-
-    format!(
-        "<b>{emoji} {signal_type} Signal: {symbol}</b>\n\
-         Price: {price:.2}\n\
-         Zone: {zone}\n\
-         \n\
-         Strength:\n\
-         \u{2022} RSI(14): {rsi:.1}\n\
-         \u{2022} Volume: {vol:.1}x average\n\
-         \u{2022} Trend: {trend}\n\
-         \n\
-         EMA(12): {fast:.2} crossed {direction} EMA(26): {slow:.2}",
-        signal_type = signal.signal_type,
-        symbol = escape_html(&signal.symbol),
-        price = signal.price,
-        zone = signal.zone.label(),
-        rsi = signal.rsi,
-        vol = signal.volume_ratio,
-        trend = trend_label,
-        fast = signal.fast_ema,
-        slow = signal.slow_ema,
-        direction = match signal.signal_type {
-            SignalType::Buy => "above",
-            SignalType::Sell => "below",
-        },
-    )
+pub(crate) fn format_alert_message(signal: &Signal, prior: Option<&LastSignal>) -> String {
+    let (headline, body) = crate::alerts::alert_content(signal, prior);
+    format!("<b>{}</b>\n{}", escape_html(&headline), escape_html(&body))
 }
 
 /// Sends a formatted signal alert to the configured Telegram chat.
@@ -112,16 +79,20 @@ pub(crate) fn format_alert_message(signal: &Signal) -> String {
 /// # Errors
 ///
 /// Returns an error if the HTTP request fails or the API returns non-200.
-pub fn send_alert(config: &Config, signal: &Signal) -> anyhow::Result<()> {
-    let text = format_alert_message(signal);
+pub fn send_alert(
+    telegram: &TelegramConfig,
+    signal: &Signal,
+    prior: Option<&LastSignal>,
+) -> anyhow::Result<()> {
+    let text = format_alert_message(signal, prior);
 
     let url = format!(
         "https://api.telegram.org/bot{}/sendMessage",
-        config.telegram_bot_token
+        telegram.bot_token
     );
 
     let msg = TelegramMessage {
-        chat_id: config.telegram_chat_id.clone(),
+        chat_id: telegram.chat_id.clone(),
         text,
         parse_mode: "HTML".to_string(),
     };
@@ -129,7 +100,7 @@ pub fn send_alert(config: &Config, signal: &Signal) -> anyhow::Result<()> {
     log::debug!(
         "{}: sending telegram alert to chat {}",
         signal.symbol,
-        config.telegram_chat_id
+        telegram.chat_id
     );
 
     let response = crate::http::agent()
@@ -177,7 +148,7 @@ mod tests {
     #[test]
     fn test_format_alert_buy_signal() {
         let signal = make_signal(SignalType::Buy, 245.67, 230.0);
-        let msg = format_alert_message(&signal);
+        let msg = format_alert_message(&signal, None);
 
         assert!(msg.contains("\u{1f7e2}"));
         assert!(msg.contains("BUY Signal: TSLA"));
@@ -190,7 +161,7 @@ mod tests {
     #[test]
     fn test_format_alert_sell_signal() {
         let signal = make_signal(SignalType::Sell, 200.00, 230.0);
-        let msg = format_alert_message(&signal);
+        let msg = format_alert_message(&signal, None);
 
         assert!(msg.contains("\u{1f534}"));
         assert!(msg.contains("SELL Signal: TSLA"));
@@ -200,7 +171,7 @@ mod tests {
     #[test]
     fn test_format_alert_bullish_trend() {
         let signal = make_signal(SignalType::Buy, 250.0, 230.0);
-        let msg = format_alert_message(&signal);
+        let msg = format_alert_message(&signal, None);
 
         assert!(msg.contains("Bullish (above SMA50)"));
     }
@@ -208,7 +179,7 @@ mod tests {
     #[test]
     fn test_format_alert_bearish_trend() {
         let signal = make_signal(SignalType::Buy, 220.0, 230.0);
-        let msg = format_alert_message(&signal);
+        let msg = format_alert_message(&signal, None);
 
         assert!(msg.contains("Bearish (below SMA50)"));
     }
@@ -217,7 +188,7 @@ mod tests {
     fn test_format_alert_escapes_html_in_symbol() {
         let mut signal = make_signal(SignalType::Buy, 245.67, 230.0);
         signal.symbol = "A&B<C>".to_string();
-        let msg = format_alert_message(&signal);
+        let msg = format_alert_message(&signal, None);
 
         assert!(msg.contains("A&amp;B&lt;C&gt;"));
         assert!(!msg.contains("B<C>"));
@@ -226,10 +197,26 @@ mod tests {
     #[test]
     fn test_format_alert_contains_strength_indicators() {
         let signal = make_signal(SignalType::Buy, 245.67, 230.0);
-        let msg = format_alert_message(&signal);
+        let msg = format_alert_message(&signal, None);
 
         assert!(msg.contains("RSI(14): 62.3"));
         assert!(msg.contains("Volume: 1.8x average"));
         assert!(msg.contains("Zone: Bull"));
+    }
+
+    #[test]
+    fn test_format_alert_includes_linked_signal() {
+        use crate::state::LastSignal;
+
+        let signal = make_signal(SignalType::Sell, 260.10, 230.0);
+        let prior = LastSignal {
+            signal_type: SignalType::Buy,
+            zone: Zone::Bull,
+            date: "2024-01-01".to_string(),
+            price: 245.67,
+        };
+        let msg = format_alert_message(&signal, Some(&prior));
+
+        assert!(msg.contains("Linked: BUY @245.67 on 2024-01-01"));
     }
 }

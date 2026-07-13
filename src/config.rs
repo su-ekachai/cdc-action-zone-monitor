@@ -1,7 +1,12 @@
 //! Configuration loading from TOML file and environment variables.
 //!
-//! Non-secret settings reside in `config.toml`. Secrets (Telegram token, chat ID)
-//! are sourced exclusively from environment variables per the 12-Factor App convention.
+//! Non-secret settings reside in `config.toml`. Secrets (Telegram token, chat ID,
+//! Discord webhook URL) are sourced exclusively from environment variables per the
+//! 12-Factor App convention.
+//!
+//! Alert channels are selected by env-var presence: setting `TELEGRAM_BOT_TOKEN` +
+//! `TELEGRAM_CHAT_ID` enables Telegram, setting `DISCORD_WEBHOOK_URL` enables
+//! Discord, and setting both enables both. At least one channel is required.
 
 use anyhow::{Context, bail};
 use serde::Deserialize;
@@ -18,11 +23,20 @@ struct Settings {
     state_file: Option<String>,
 }
 
+/// Telegram credentials; present only when both env vars are set.
+#[derive(Debug)]
+pub struct TelegramConfig {
+    pub bot_token: String,
+    pub chat_id: String,
+}
+
 /// Fully-resolved application configuration combining TOML values and environment secrets.
 #[derive(Debug)]
 pub struct Config {
-    pub telegram_bot_token: String,
-    pub telegram_chat_id: String,
+    /// `Some` when `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are both set.
+    pub telegram: Option<TelegramConfig>,
+    /// `Some` when `DISCORD_WEBHOOK_URL` is set.
+    pub discord_webhook_url: Option<String>,
     pub state_file: String,
     pub watchlist: Vec<WatchlistEntry>,
 }
@@ -47,13 +61,14 @@ impl Config {
     /// Resolution order:
     /// 1. TOML file at `path` provides `state_file` and `[[watchlist]]`
     /// 2. `.env` file (if present) populates environment variables via `dotenvy`
-    /// 3. `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are required from the environment
+    /// 3. Alert channels resolve from env-var presence (Telegram and/or Discord);
+    ///    at least one channel must be configured
     /// 4. `STATE_FILE` env var overrides the TOML value for deployment flexibility
     ///
     /// # Errors
     ///
-    /// Returns an error if the TOML file is unreadable/unparseable or required
-    /// environment variables are missing or empty.
+    /// Returns an error if the TOML file is unreadable/unparseable, Telegram
+    /// credentials are only partially set, or no alert channel is configured.
     pub fn load(path: &str) -> anyhow::Result<Self> {
         dotenvy::dotenv().ok();
 
@@ -62,16 +77,21 @@ impl Config {
         let toml_cfg: TomlConfig = toml::from_str(&content)
             .with_context(|| format!("Failed to parse config file: {path}"))?;
 
-        let telegram_bot_token =
-            std::env::var("TELEGRAM_BOT_TOKEN").context("TELEGRAM_BOT_TOKEN must be set")?;
-        let telegram_chat_id =
-            std::env::var("TELEGRAM_CHAT_ID").context("TELEGRAM_CHAT_ID must be set")?;
+        let telegram_bot_token = env_non_empty("TELEGRAM_BOT_TOKEN");
+        let telegram_chat_id = env_non_empty("TELEGRAM_CHAT_ID");
+        let discord_webhook_url = env_non_empty("DISCORD_WEBHOOK_URL");
 
-        if telegram_bot_token.is_empty() {
-            bail!("TELEGRAM_BOT_TOKEN cannot be empty");
-        }
-        if telegram_chat_id.is_empty() {
-            bail!("TELEGRAM_CHAT_ID cannot be empty");
+        let telegram = match (telegram_bot_token, telegram_chat_id) {
+            (Some(bot_token), Some(chat_id)) => Some(TelegramConfig { bot_token, chat_id }),
+            (None, None) => None,
+            _ => bail!("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set together"),
+        };
+
+        if telegram.is_none() && discord_webhook_url.is_none() {
+            bail!(
+                "No alert channel configured: TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID \
+                 and/or DISCORD_WEBHOOK_URL must be set"
+            );
         }
 
         let state_file = resolve_state_file(toml_cfg.settings.and_then(|s| s.state_file));
@@ -79,17 +99,30 @@ impl Config {
         let watchlist = watchlist::load(path)?;
 
         log::debug!(
-            "Config loaded: state_file={state_file}, watchlist={} symbols",
-            watchlist.len()
+            "Config loaded: state_file={state_file}, watchlist={} symbols, channels={}",
+            watchlist.len(),
+            [
+                telegram.as_ref().map(|_| "telegram"),
+                discord_webhook_url.as_ref().map(|_| "discord"),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join("+")
         );
 
         Ok(Self {
-            telegram_bot_token,
-            telegram_chat_id,
+            telegram,
+            discord_webhook_url,
             state_file,
             watchlist,
         })
     }
+}
+
+/// Reads an environment variable, treating empty strings as unset.
+fn env_non_empty(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|v| !v.is_empty())
 }
 
 /// Resolves the state file path: the `STATE_FILE` env var overrides the TOML
@@ -171,25 +204,32 @@ state_file = "custom_state.json"
     // env var mutations can race. We mark these #[ignore] for the default
     // parallel run and execute them separately with --test-threads=1.
 
-    #[test]
-    #[ignore = "mutates process env vars, must run single-threaded"]
-    fn test_load_missing_telegram_token_returns_error() {
+    fn clear_channel_env() {
         unsafe {
             std::env::remove_var("TELEGRAM_BOT_TOKEN");
             std::env::remove_var("TELEGRAM_CHAT_ID");
+            std::env::remove_var("DISCORD_WEBHOOK_URL");
         }
+    }
+
+    #[test]
+    #[ignore = "mutates process env vars, must run single-threaded"]
+    fn test_load_no_channel_returns_error() {
+        clear_channel_env();
 
         let f = write_config("[settings]\nstate_file = \"test.json\"\n");
         let result = Config::load(f.path().to_str().unwrap());
 
         assert!(result.is_err());
-        assert!(format!("{:#}", result.unwrap_err()).contains("TELEGRAM_BOT_TOKEN"));
+        assert!(format!("{:#}", result.unwrap_err()).contains("No alert channel configured"));
     }
 
     #[test]
     #[ignore = "mutates process env vars, must run single-threaded"]
-    fn test_load_empty_telegram_token_returns_error() {
+    fn test_load_partial_telegram_returns_error() {
+        clear_channel_env();
         unsafe {
+            // Empty string counts as unset, so this is token-only.
             std::env::set_var("TELEGRAM_BOT_TOKEN", "");
             std::env::set_var("TELEGRAM_CHAT_ID", "12345");
         }
@@ -197,18 +237,40 @@ state_file = "custom_state.json"
         let f = write_config("[settings]\nstate_file = \"test.json\"\n");
         let result = Config::load(f.path().to_str().unwrap());
 
-        unsafe {
-            std::env::remove_var("TELEGRAM_BOT_TOKEN");
-            std::env::remove_var("TELEGRAM_CHAT_ID");
-        }
+        clear_channel_env();
 
         assert!(result.is_err());
-        assert!(format!("{:#}", result.unwrap_err()).contains("cannot be empty"));
+        assert!(format!("{:#}", result.unwrap_err()).contains("must be set together"));
+    }
+
+    #[test]
+    #[ignore = "mutates process env vars, must run single-threaded"]
+    fn test_load_discord_only_is_valid() {
+        clear_channel_env();
+        unsafe {
+            std::env::set_var(
+                "DISCORD_WEBHOOK_URL",
+                "https://discord.com/api/webhooks/1/fake",
+            );
+        }
+
+        let f = write_config("[settings]\nstate_file = \"test.json\"\n");
+        let result = Config::load(f.path().to_str().unwrap());
+
+        clear_channel_env();
+
+        let config = result.unwrap();
+        assert!(config.telegram.is_none());
+        assert_eq!(
+            config.discord_webhook_url.as_deref(),
+            Some("https://discord.com/api/webhooks/1/fake")
+        );
     }
 
     #[test]
     #[ignore = "mutates process env vars, must run single-threaded"]
     fn test_load_valid_config() {
+        clear_channel_env();
         unsafe {
             std::env::set_var("TELEGRAM_BOT_TOKEN", "fake_token_for_valid_test");
             std::env::set_var("TELEGRAM_CHAT_ID", "99999");
@@ -227,13 +289,12 @@ source = "binance"
 
         let config = Config::load(f.path().to_str().unwrap()).unwrap();
 
-        unsafe {
-            std::env::remove_var("TELEGRAM_BOT_TOKEN");
-            std::env::remove_var("TELEGRAM_CHAT_ID");
-        }
+        clear_channel_env();
 
-        assert_eq!(config.telegram_bot_token, "fake_token_for_valid_test");
-        assert_eq!(config.telegram_chat_id, "99999");
+        let telegram = config.telegram.expect("telegram channel should be active");
+        assert_eq!(telegram.bot_token, "fake_token_for_valid_test");
+        assert_eq!(telegram.chat_id, "99999");
+        assert!(config.discord_webhook_url.is_none());
         assert_eq!(config.state_file, "test_state.json");
         assert_eq!(config.watchlist.len(), 1);
         assert_eq!(config.watchlist[0].symbol, "BTC-USD");
