@@ -85,9 +85,13 @@ enum Command {
         #[arg(long)]
         json: bool,
 
-        /// Analyze signals but don't send Telegram alerts
+        /// Analyze signals but don't send alerts
         #[arg(long)]
         dry_run: bool,
+
+        /// Send a still-alive summary to alert channels when no new signals are found
+        #[arg(long)]
+        heartbeat: bool,
     },
     /// Add a symbol to the watchlist
     Add {
@@ -200,8 +204,30 @@ fn main() {
     let quiet = args.quiet;
     let color = args.color;
     let result = match args.command {
-        None => run_scan(config_path, false, false, quiet, color),
-        Some(Command::Scan { json, dry_run }) => run_scan(config_path, json, dry_run, quiet, color),
+        None => run_scan(
+            config_path,
+            ScanOpts {
+                json: false,
+                dry_run: false,
+                heartbeat: false,
+                quiet,
+                color,
+            },
+        ),
+        Some(Command::Scan {
+            json,
+            dry_run,
+            heartbeat,
+        }) => run_scan(
+            config_path,
+            ScanOpts {
+                json,
+                dry_run,
+                heartbeat,
+                quiet,
+                color,
+            },
+        ),
         Some(Command::Add { symbol, source }) => {
             let source = source.map(|s| s.parse::<DataSource>()).transpose();
             match source {
@@ -240,15 +266,28 @@ fn is_config_error(err: &anyhow::Error) -> bool {
         || msg.contains("cannot be empty")
 }
 
-/// Executes the full scan workflow: load config, fetch candles for each symbol,
-/// detect crossovers, send alerts for new signals, and persist state.
-fn run_scan(
-    config_path: &str,
+/// Options controlling a scan run, bundled to keep `run_scan` readable.
+// CLI flags are naturally boolean; this is a parameter bag, not state.
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Clone, Copy)]
+struct ScanOpts {
     json: bool,
     dry_run: bool,
+    heartbeat: bool,
     quiet: bool,
     color: ColorMode,
-) -> anyhow::Result<()> {
+}
+
+/// Executes the full scan workflow: load config, fetch candles for each symbol,
+/// detect crossovers, send alerts for new signals, and persist state.
+fn run_scan(config_path: &str, opts: ScanOpts) -> anyhow::Result<()> {
+    let ScanOpts {
+        json,
+        dry_run,
+        heartbeat,
+        quiet,
+        color,
+    } = opts;
     let scan_start = Instant::now();
 
     let config = Config::load(config_path)?;
@@ -387,6 +426,23 @@ fn run_scan(
         state.save()?;
     }
 
+    // Still-alive summary on quiet days, so channel silence never means
+    // "silently broken". Delivery failure logs a warning but does not fail
+    // the scan — the heartbeat is best-effort by design.
+    if heartbeat && !dry_run && signals_found == 0 {
+        let msg = heartbeat_message(total, errors);
+        if let Some(telegram) = &config.telegram
+            && let Err(e) = alerts::telegram::send_text(telegram, &msg)
+        {
+            log::warn!("heartbeat: telegram delivery failed: {e:#}");
+        }
+        if let Some(webhook_url) = &config.discord_webhook_url
+            && let Err(e) = alerts::discord::send_text(webhook_url, &msg)
+        {
+            log::warn!("heartbeat: discord delivery failed: {e:#}");
+        }
+    }
+
     if show_progress {
         eprint!("\r\x1b[K");
     }
@@ -436,6 +492,16 @@ fn run_scan(
         );
     }
     Ok(())
+}
+
+/// Builds the no-signal heartbeat text, noting failed symbols when present.
+fn heartbeat_message(total: usize, errors: usize) -> String {
+    let suffix = if errors > 0 {
+        format!(" ({errors} error(s) — see logs)")
+    } else {
+        String::new()
+    };
+    format!("\u{2705} Scan OK — {total} symbols, no new signals{suffix}")
 }
 
 /// Sends the alert on every configured channel, returning per-channel failures.
@@ -690,5 +756,21 @@ mod tests {
     fn test_is_config_error_runtime_error_returns_false() {
         let err = anyhow::anyhow!("network timeout connecting to api.binance.com");
         assert!(!is_config_error(&err));
+    }
+
+    #[test]
+    fn test_heartbeat_message_clean() {
+        assert_eq!(
+            heartbeat_message(5, 0),
+            "\u{2705} Scan OK — 5 symbols, no new signals"
+        );
+    }
+
+    #[test]
+    fn test_heartbeat_message_with_errors() {
+        assert_eq!(
+            heartbeat_message(5, 2),
+            "\u{2705} Scan OK — 5 symbols, no new signals (2 error(s) — see logs)"
+        );
     }
 }

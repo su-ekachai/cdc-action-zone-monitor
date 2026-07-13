@@ -64,16 +64,34 @@ pub fn send_alert(
     signal: &Signal,
     prior: Option<&LastSignal>,
 ) -> anyhow::Result<()> {
-    let msg = DiscordMessage {
-        content: format_alert_message(signal, prior),
-    };
+    post(
+        webhook_url,
+        format_alert_message(signal, prior),
+        &signal.symbol,
+    )
+}
 
-    log::debug!("{}: sending discord alert", signal.symbol);
+/// Sends a plain-text message (heartbeats, operational notes) to the webhook.
+///
+/// # Errors
+///
+/// Returns an error if the HTTP request fails or the API returns a non-2xx status.
+pub fn send_text(webhook_url: &str, text: &str) -> anyhow::Result<()> {
+    post(webhook_url, text.to_string(), "message")
+}
+
+/// Posts a message to the webhook.
+///
+/// `label` names the message in logs and errors (symbol for alerts).
+fn post(webhook_url: &str, content: String, label: &str) -> anyhow::Result<()> {
+    let msg = DiscordMessage { content };
+
+    log::debug!("{label}: sending discord message");
 
     let response = crate::http::agent()
         .post(webhook_url)
         .send_json(&msg)
-        .with_context(|| format!("{}: discord webhook request failed", signal.symbol))?;
+        .with_context(|| format!("{label}: discord webhook request failed"))?;
 
     // Rate-limit courtesy: sleep after each request regardless of outcome.
     // ureq v3 converts 4xx/5xx to Err at send_json(); Discord replies
@@ -82,13 +100,10 @@ pub fn send_alert(
 
     let status = response.status().as_u16();
     if !(200..300).contains(&status) {
-        anyhow::bail!(
-            "{}: discord returned HTTP {status} — alert not delivered",
-            signal.symbol
-        );
+        anyhow::bail!("{label}: discord returned HTTP {status} — message not delivered");
     }
 
-    log::debug!("{}: discord alert delivered (HTTP {status})", signal.symbol);
+    log::debug!("{label}: discord message delivered (HTTP {status})");
     Ok(())
 }
 
