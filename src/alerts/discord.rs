@@ -51,7 +51,7 @@ struct DiscordMessage {
 /// Builds the Markdown-formatted alert message for a signal.
 pub(crate) fn format_alert_message(signal: &Signal, prior: Option<&LastSignal>) -> String {
     let (headline, body) = crate::alerts::alert_content(signal, prior);
-    format!("**{headline}**\n{body}")
+    format!("{}\n**{headline}**\n{body}", crate::alerts::date_header())
 }
 
 /// Sends a formatted signal alert to the configured Discord webhook.
@@ -131,7 +131,8 @@ mod tests {
     fn test_format_alert_bold_headline_markdown() {
         let msg = format_alert_message(&make_signal(SignalType::Buy), None);
 
-        assert!(msg.starts_with("**"));
+        assert!(msg.starts_with("\u{1f4c5} Daily Scan \u{00b7} "));
+        assert!(msg.contains("\n**"));
         assert!(msg.contains("BUY Signal: TSLA**"));
         assert!(msg.contains("Price: 245.67"));
         assert!(msg.contains("EMA(12): 243.50"));

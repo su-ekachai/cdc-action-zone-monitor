@@ -68,7 +68,12 @@ fn escape_html(s: &str) -> String {
 /// Builds the HTML-formatted alert message for a signal.
 pub(crate) fn format_alert_message(signal: &Signal, prior: Option<&LastSignal>) -> String {
     let (headline, body) = crate::alerts::alert_content(signal, prior);
-    format!("<b>{}</b>\n{}", escape_html(&headline), escape_html(&body))
+    format!(
+        "{}\n<b>{}</b>\n{}",
+        crate::alerts::date_header(),
+        escape_html(&headline),
+        escape_html(&body)
+    )
 }
 
 /// Sends a formatted signal alert to the configured Telegram chat.

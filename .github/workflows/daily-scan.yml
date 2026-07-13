@@ -69,13 +69,15 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          MSG="⚠️ Daily scan failed: $RUN_URL"
+          MSG="📅 Daily Scan · $(date -u +%F)
+          ⚠️ Scan failed: $RUN_URL"
           if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
             curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
               -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode text="$MSG" || true
           fi
           if [ -n "$DISCORD_WEBHOOK_URL" ]; then
+            # jq builds the JSON body so the newline in MSG stays valid JSON.
             curl -sS -X POST "$DISCORD_WEBHOOK_URL" \
               -H "Content-Type: application/json" \
-              -d "{\"content\": \"$MSG\"}" || true
+              -d "$(jq -n --arg content "$MSG" '{content: $content}')" || true
           fi
