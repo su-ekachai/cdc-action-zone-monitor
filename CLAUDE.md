@@ -3,17 +3,21 @@
 ## Overview
 
 A lightweight Rust CLI that scans a watchlist of assets daily for CDC Action Zone
-(EMA 12/26 crossover) signals and sends Telegram alerts. The binary runs via cron
-on a Raspberry Pi or $5/mo VPS.
+(EMA 12/26 crossover) signals and sends Telegram and/or Discord alerts. Runs daily
+on GitHub Actions (`.github/workflows/daily-scan.yml`) or via cron on a Raspberry
+Pi / $5/mo VPS — pick one runner, not both (duplicate alerts + state divergence).
 
 ## Architecture
 
-Single binary, no daemon. Cron triggers → fetch prices → detect crossovers → alert → exit.
+Single binary, no daemon. Cron/Actions triggers → fetch prices → detect crossovers → alert → exit.
 
 ```
 main.rs → config + watchlist + state
-        → for each symbol: data provider → cdc_zone::analyze → telegram alert
+        → for each symbol: data provider → cdc_zone::analyze → telegram/discord alerts
 ```
+
+On GitHub Actions the workflow commits `last_signals.json` back to the repo after
+each scan so state survives ephemeral runners.
 
 ## Key Decisions
 
@@ -28,8 +32,16 @@ main.rs → config + watchlist + state
 - **Closed candles only (Binance)**: the in-progress UTC-day candle is dropped before
   analysis, so signals fire on bar close (no repaint) — matching the original
   TradingView script. Yahoo candles are not filtered; run the scan after market close.
-- **State updates only on delivered alerts**: `--dry-run` and failed Telegram sends
-  leave the state file untouched, so a same-day re-run retries the alert
+- **Alert channels by env-var presence**: `TELEGRAM_BOT_TOKEN`+`TELEGRAM_CHAT_ID` → Telegram,
+  `DISCORD_WEBHOOK_URL` → Discord, both → both. At least one required (exit 2 otherwise).
+- **State updates only on fully delivered alerts**: `--dry-run` and failed sends
+  leave the state file untouched, so a same-day re-run retries the alert. With two
+  channels, a partial failure retries both next run (duplicate on the delivered
+  channel beats a lost alert on the failed one).
+- **Linked signals**: each alert appends the prior opposite signal (price, date,
+  round-trip %) read from state before it is overwritten — see `alerts::linked_line`
+- **binance.vision mirror**: klines are fetched from `data-api.binance.vision`
+  because `api.binance.com` geo-blocks US IPs (HTTP 451), including GitHub runners
 - **Atomic file writes**: state and watchlist writes go through `fsutil::write_atomic`
   (temp file + rename) so a mid-write kill can't corrupt them
 
@@ -51,9 +63,10 @@ src/
 ├── signals/
 │   ├── indicators.rs  EMA, SMA, RSI, volume_ratio
 │   └── cdc_zone.rs    Crossover detection
-├── alerts.rs          Module declarations
+├── alerts.rs          Shared alert content (headline/body + linked-signal line)
 └── alerts/
-    └── telegram.rs    Telegram Bot API (sendMessage + getMe)
+    ├── telegram.rs    Telegram Bot API (sendMessage + getMe), HTML markup
+    └── discord.rs     Discord webhook (POST + GET ping), Markdown markup
 ```
 
 ## Commands
@@ -71,6 +84,7 @@ cargo run -- add MSFT --source yahoo     # Add with explicit source
 cargo run -- remove AAPL                 # Remove symbol
 cargo run -- check                       # Validate config + env vars
 cargo run -- check --telegram            # Also ping Telegram API
+cargo run -- check --discord             # Also ping Discord webhook
 cargo run -- status                      # Show last signals from state file
 cargo run -- completions bash            # Generate shell completions
 cargo run -- --config custom.toml list   # Use alternate config file
@@ -96,10 +110,12 @@ Non-secret settings and the watchlist reside in `config.toml`. Secrets are in `.
 - `[settings]` — `state_file` path
 - `[[watchlist]]` — symbol entries with optional `source` field
 
-**`.env`** (secrets only, copy from `.env.example`):
-- `TELEGRAM_BOT_TOKEN` (required)
-- `TELEGRAM_CHAT_ID` (required)
+**`.env`** (secrets only, copy from `.env.example`; at least one channel required):
+- `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` (Telegram channel — set together)
+- `DISCORD_WEBHOOK_URL` (Discord channel)
 - `STATE_FILE` (optional — overrides `state_file` from config.toml)
+
+On GitHub Actions the same names are repo secrets (Settings → Secrets and variables → Actions).
 
 ## Data Sources
 
@@ -144,6 +160,13 @@ cargo run -- -vv scan       # Trace verbosity (HTTP URLs)
 ```
 
 ## Deployment
+
+**GitHub Actions (default)**: `.github/workflows/daily-scan.yml` — daily at 22:15 UTC
++ `workflow_dispatch`. Builds with `Swatinem/rust-cache`, retries the scan once after
+5 minutes, commits state with `[skip ci]`, and notifies Telegram/Discord on failure.
+Requires repo secrets and `permissions: contents: write`.
+
+**Self-hosted (cron)**:
 
 ```bash
 cargo build --release
