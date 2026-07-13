@@ -118,6 +118,7 @@ cdc-az-daily-alert remove PTT.BK           # Remove symbol
 ```bash
 cdc-az-daily-alert scan                    # Full scan (sends alerts)
 cdc-az-daily-alert scan --dry-run          # Analyze without sending alerts
+cdc-az-daily-alert scan --heartbeat        # Also send "still alive" note when no signals
 cdc-az-daily-alert scan --json             # Structured JSON output
 cdc-az-daily-alert -q scan                 # Quiet mode (for cron)
 ```

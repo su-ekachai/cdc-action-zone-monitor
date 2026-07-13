@@ -84,8 +84,26 @@ pub fn send_alert(
     signal: &Signal,
     prior: Option<&LastSignal>,
 ) -> anyhow::Result<()> {
-    let text = format_alert_message(signal, prior);
+    post(
+        telegram,
+        format_alert_message(signal, prior),
+        &signal.symbol,
+    )
+}
 
+/// Sends a plain-text message (heartbeats, operational notes) to the chat.
+///
+/// # Errors
+///
+/// Returns an error if the HTTP request fails or the API returns non-200.
+pub fn send_text(telegram: &TelegramConfig, text: &str) -> anyhow::Result<()> {
+    post(telegram, escape_html(text), "message")
+}
+
+/// Posts an HTML-formatted message via the `sendMessage` endpoint.
+///
+/// `label` names the message in logs and errors (symbol for alerts).
+fn post(telegram: &TelegramConfig, text: String, label: &str) -> anyhow::Result<()> {
     let url = format!(
         "https://api.telegram.org/bot{}/sendMessage",
         telegram.bot_token
@@ -98,15 +116,14 @@ pub fn send_alert(
     };
 
     log::debug!(
-        "{}: sending telegram alert to chat {}",
-        signal.symbol,
+        "{label}: sending telegram message to chat {}",
         telegram.chat_id
     );
 
     let response = crate::http::agent()
         .post(&url)
         .send_json(&msg)
-        .with_context(|| format!("{}: telegram API request failed", signal.symbol))?;
+        .with_context(|| format!("{label}: telegram API request failed"))?;
 
     // Rate-limit courtesy: sleep after each request regardless of outcome.
     // Note: ureq v3 converts 4xx/5xx to Err at send_json(), so the status
@@ -115,13 +132,12 @@ pub fn send_alert(
 
     if response.status() != 200 {
         anyhow::bail!(
-            "{}: telegram returned HTTP {} — alert not delivered",
-            signal.symbol,
+            "{label}: telegram returned HTTP {} — message not delivered",
             response.status()
         );
     }
 
-    log::debug!("{}: telegram alert delivered (HTTP 200)", signal.symbol);
+    log::debug!("{label}: telegram message delivered (HTTP 200)");
     Ok(())
 }
 

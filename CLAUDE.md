@@ -76,6 +76,7 @@ cargo build --release                    # Build
 cargo test                               # Run unit tests
 cargo run -- scan                        # Run scan (needs .env for secrets)
 cargo run -- scan --dry-run              # Analyze without sending alerts
+cargo run -- scan --heartbeat            # Send still-alive note when no signals
 cargo run -- scan --json                 # JSON output to stdout
 cargo run -- list                        # Show watchlist (colored table)
 cargo run -- list --json                 # Watchlist as JSON
