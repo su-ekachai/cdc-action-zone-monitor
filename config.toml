@@ -13,3 +13,15 @@ symbol = "ETH-USD"
 
 [[watchlist]]
 symbol = "PAXG-USD"
+
+[[watchlist]]
+symbol = "BNB-USD"
+
+[[watchlist]]
+symbol = "SOL-USD"
+
+[[watchlist]]
+symbol = "XRP-USD"
+
+[[watchlist]]
+symbol = "DOGE-USD"
