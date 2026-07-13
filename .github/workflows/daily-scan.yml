@@ -82,6 +82,9 @@ jobs:
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add last_signals.json
             git commit -m "chore: update signal state [skip ci]"
+            # Rebase in case something was pushed while the scan ran,
+            # so the state push doesn't fail the whole run.
+            git pull --rebase
             git push
           else
             echo "No state change — nothing to commit."
