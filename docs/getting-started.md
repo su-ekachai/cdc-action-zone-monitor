@@ -123,7 +123,7 @@ duplicates alerts and lets their state files diverge.
 
 The repo ships with `.github/workflows/daily-scan.yml`, which builds and runs
 the scan daily at 00:15 UTC (just after the Binance daily candle closes) and
-commits `last_signals.json` back to the repo.
+keeps `last_signals.json` in the Actions cache between runs.
 
 1. Push the repo to GitHub (public repos get unlimited Actions minutes)
 2. Add repo secrets under **Settings → Secrets and variables → Actions**:
@@ -133,8 +133,10 @@ commits `last_signals.json` back to the repo.
 
 Known limitations:
 - GitHub cron is best-effort — runs may start 5–30 minutes late (fine for daily candles)
-- Scheduled workflows auto-disable after 60 days without repo activity; state
-  commits normally keep it alive, and GitHub emails a warning with a one-click re-enable
+- Scheduled workflows auto-disable after 60 days without repo activity; the
+  workflow's keepalive step prevents this by re-enabling itself on every run
+- Signal state lives in the Actions cache, which GitHub evicts after 7 days
+  without use — after a longer outage the next scan starts from empty state
 - Yahoo Finance occasionally rate-limits datacenter IPs; the workflow retries
   once after 5 minutes, and persistent failures are reported to your alert channels
 - On days with no signals, a short heartbeat message confirms the scan ran
