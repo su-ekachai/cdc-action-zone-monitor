@@ -16,8 +16,8 @@ main.rs → config + watchlist + state
         → for each symbol: data provider → cdc_zone::analyze → telegram/discord alerts
 ```
 
-On GitHub Actions the workflow commits `last_signals.json` back to the repo after
-each scan so state survives ephemeral runners.
+On GitHub Actions the workflow keeps `last_signals.json` in the Actions cache
+(`actions/cache`) so state survives ephemeral runners.
 
 ## Key decisions
 
@@ -164,11 +164,11 @@ cargo run -- -vv scan       # Trace verbosity (HTTP URLs)
 
 **GitHub Actions (default)**: `.github/workflows/daily-scan.yml` — daily at 00:15 UTC
 (just after the Binance daily candle closes) + `workflow_dispatch`. Builds with
-`Swatinem/rust-cache`, retries the scan once after 5 minutes, commits state with
-`[skip ci]`, and notifies Telegram/Discord on failure.
+`Swatinem/rust-cache`, retries the scan once after 5 minutes, persists state via
+`actions/cache`, and notifies Telegram/Discord on failure.
 A keepalive step re-enables the workflow each run so GitHub's 60-day
 inactivity rule doesn't disable the schedule.
-Requires repo secrets and `permissions: contents: write` + `actions: write`.
+Requires repo secrets and `permissions: actions: write`.
 
 **Self-hosted (cron)**:
 

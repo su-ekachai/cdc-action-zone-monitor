@@ -194,7 +194,7 @@ Pick **one** runner — GitHub Actions or your own machine. Running both duplica
 
 ### GitHub Actions (zero cost, no server)
 
-`.github/workflows/daily-scan.yml` builds and runs the scan daily at 00:15 UTC (07:15 Bangkok), minutes after the Binance daily candle closes, on GitHub's free tier. It commits `last_signals.json` back to the repo so state survives between runs.
+`.github/workflows/daily-scan.yml` builds and runs the scan daily at 00:15 UTC (07:15 Bangkok), minutes after the Binance daily candle closes, on GitHub's free tier. It keeps `last_signals.json` in the Actions cache so state survives between runs.
 
 Setup: add repo secrets under **Settings → Secrets and variables → Actions** — `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` and/or `DISCORD_WEBHOOK_URL` — then trigger a test run via **Actions → Daily Scan → Run workflow**.
 

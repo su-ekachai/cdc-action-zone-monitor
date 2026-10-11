@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write # commit last_signals.json back to the repo
+  contents: read
   actions: write # keepalive step re-enables this workflow
 
 env:
@@ -30,6 +30,17 @@ jobs:
       - name: Build
         run: cargo build --release
 
+      - name: Restore signal state
+        # Runners are ephemeral, so last_signals.json lives in the Actions
+        # cache. Caches are immutable: each run saves under its own key and
+        # the next run restores the newest one via the prefix. GitHub evicts
+        # caches unused for 7 days, so a longer outage starts from empty state.
+        uses: actions/cache@v4
+        with:
+          path: last_signals.json
+          key: signal-state-${{ github.run_id }}
+          restore-keys: signal-state-
+
       - name: Scan watchlist
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -45,26 +56,9 @@ jobs:
             ./target/release/cdc-az-daily-alert scan --heartbeat
           }
 
-      - name: Commit updated state
-        # State changes only when a signal fires; skip empty commits.
-        # [skip ci] keeps ci.yml from running on state-only commits.
-        run: |
-          if ! git diff --quiet last_signals.json 2>/dev/null || [ -n "$(git ls-files --others --exclude-standard last_signals.json)" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add last_signals.json
-            git commit -m "chore: update signal state [skip ci]"
-            # Rebase in case something was pushed while the scan ran,
-            # so the state push doesn't fail the whole run.
-            git pull --rebase
-            git push
-          else
-            echo "No state change — nothing to commit."
-          fi
-
       - name: Keepalive
         # GitHub disables scheduled workflows after 60 days without repo
-        # activity, and state commits only happen when a signal fires.
+        # activity, and the scan never pushes to the repo.
         # Re-enabling an active workflow resets that timer.
         if: always()
         env:
