@@ -166,7 +166,9 @@ cargo run -- -vv scan       # Trace verbosity (HTTP URLs)
 (just after the Binance daily candle closes) + `workflow_dispatch`. Builds with
 `Swatinem/rust-cache`, retries the scan once after 5 minutes, commits state with
 `[skip ci]`, and notifies Telegram/Discord on failure.
-Requires repo secrets and `permissions: contents: write`.
+A keepalive step re-enables the workflow each run so GitHub's 60-day
+inactivity rule doesn't disable the schedule.
+Requires repo secrets and `permissions: contents: write` + `actions: write`.
 
 **Self-hosted (cron)**:
 

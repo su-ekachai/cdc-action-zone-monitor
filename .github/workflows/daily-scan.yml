@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: write # commit last_signals.json back to the repo
+  actions: write # keepalive step re-enables this workflow
 
 env:
   CARGO_TERM_COLOR: always
@@ -60,6 +61,15 @@ jobs:
           else
             echo "No state change — nothing to commit."
           fi
+
+      - name: Keepalive
+        # GitHub disables scheduled workflows after 60 days without repo
+        # activity, and state commits only happen when a signal fires.
+        # Re-enabling an active workflow resets that timer.
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow enable daily-scan.yml --repo "$GITHUB_REPOSITORY"
 
       - name: Notify on failure
         if: failure()
